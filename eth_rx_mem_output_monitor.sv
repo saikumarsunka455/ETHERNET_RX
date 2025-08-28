@@ -18,9 +18,8 @@ class eth_rx_mem_output_monitor extends uvm_monitor;
 	bit[7:0] dist_addr_q[6];      //------distnation addr---//
 	bit[7:0] length_q[2];         //------length -----------//
 	bit[7:0] crc_q[4];            //------crc---------------//
-	bit flag;
 
-	int bit32_flag; //-------------------- internal rxbd_count---------
+	int bit32_flag; //-------------------- internal rxbd_count--------
 	//-------- for respective bd_adr--------------//
 	bit[15:0] rx_bd_addr;
 	//-------- for total frame receive ---------------------//
@@ -37,6 +36,8 @@ class eth_rx_mem_output_monitor extends uvm_monitor;
 	bit[3:0] nibble_crc[$];
 	//------------queue for active nibbles of nibble_crc queue
 	bit[3:0] nibble_crc_temp[$];
+	int temp_length;
+	bit flag;
 
 //=============== uvm event pool =======
 	uvm_event event_out_mon;
@@ -90,23 +91,22 @@ class eth_rx_mem_output_monitor extends uvm_monitor;
 	endtask
 
 	
-
 	//-------------------------task for frame colleting----------------------------
 	task frame_collection;
 
 		if(h_seq_item.m_psel_o && h_seq_item.m_penable_o && h_seq_item.m_pwrite_o&&h_seq_item.m_pready_i) begin
-//			if(h_eth_config_class.RXD[1024+((h_eth_config_class.TX_BD_NUM)*8)+4]==m_paddr_o) 
+		//	if(h_eth_config_class.RXD[1024+((h_eth_config_class.TX_BD_NUM)*8)+4]==m_paddr_o) 
 			begin
 
-				//-------------------colleting 32bit frame for every edge and storing into into byte byte into queue---------------
-				//-------------------colleting frame------------------------------------------------------------------------------
+//-------------------colleting 32bit frame for every edge and storing into into byte byte into queue---------------
+//-------------------colleting frame------------------------------------------------------------------------------
 				frame_byte_queue.push_back({h_seq_item.m_pwdata_o[27:24] , h_seq_item.m_pwdata_o[31:28]});
 				frame_byte_queue.push_back({h_seq_item.m_pwdata_o[19:16] , h_seq_item.m_pwdata_o[23:20]});
 				frame_byte_queue.push_back({h_seq_item.m_pwdata_o[11:8] , h_seq_item.m_pwdata_o[15:12]});
 				frame_byte_queue.push_back({h_seq_item.m_pwdata_o[3:0] , h_seq_item.m_pwdata_o[7:4]});
 	
 
-				//-------------------colleting 32bit frame for every edge and storing into nibble nibble into queue for crc check---------------
+//-------------------colleting 32bit frame for every edge and storing into nibble nibble into queue for crc check---------------
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[27:24]);
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[31:28]);
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[19:16]);
@@ -115,80 +115,58 @@ class eth_rx_mem_output_monitor extends uvm_monitor;
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[15:12]);
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[3:0]);
 				nibble_crc_temp.push_back(h_seq_item.m_pwdata_o[7:4]);
-
-			//----------------increment for every 32bit received---------------------------------
-			bit32_flag++; 
-			
-			//---------------storing initial rx_bd_addr-----------------------------------------
-			if(!bd_loc_flag) begin
-				bd_loc_flag =1;
-				rx_bd_addr = 1024+(h_eth_config_class.TX_BD_NUM*8);
-			end
-
-
-				//-----------------if frame length is multiples 4 then  bd_done will be length/4 times ---- 80/4 = 20-----
-
-			if(!flag) begin
-				if((18+h_eth_config_class.RXD[rx_bd_addr][31:16])%4==0) begin
-					bd_done = (18+h_eth_config_class.RXD[rx_bd_addr][31:16])/4;
-					flag = 1;
+//----------------increment for every 32bit received---------------------------------
+				bit32_flag++; 
+//---------------storing initial rx_bd_addr-----------------------------------------
+				if(!bd_loc_flag) begin
+					bd_loc_flag =1;
+					rx_bd_addr = 1024+(h_eth_config_class.TX_BD_NUM*8);
 				end
-				else begin
-				//-----------------if frame length is not multiples 4 then  bd_done will be length/4+1 time ---- 81/4 = 21-----
-					bd_done = (18+h_eth_config_class.RXD[rx_bd_addr][31:16])/4+1; //2+6+6+payload_length+4
-					flag = 1;
+		
+//--------------check only 1 time for respective bd_bd-----------------------
+				if(!flag) begin
+					if(h_eth_config_class.RXD[rx_bd_addr][31:16]<46)
+						temp_length = 46;
+					else
+						temp_length = h_eth_config_class.RXD[rx_bd_addr][31:16]; 
+	
+//-----------------if frame length is multiples 4 then  bd_done will be length/4 times ---- 80/4 = 20-----
+					if((18+temp_length)%4==0) begin
+						bd_done = (18+temp_length)/4;
+						flag = 1;
+					end
+					else begin
+//-----------------if frame length is not multiples 4 then  bd_done will be length/4+1 time ---- 81/4 = 21-----
+						bd_done = (18+temp_length)/4+1; //2+6+6+payload_length+4
+						flag = 1;
+					end
 				end
-			end
 
-			//-----------------if frame length is multiples 4 then  bd_done will be length/4 times ---- 80/4 = 20-----
-			if((18+h_eth_config_class.RXD[rx_bd_addr][31:16])%4==0)
-				bd_done = (18+h_eth_config_class.RXD[rx_bd_addr][31:16])/4;
-			else
-			//-----------------if frame length is not multiples 4 then  bd_done will be length/4+1 time ---- 81/4 = 21-----
-				bd_done = (18+h_eth_config_class.RXD[rx_bd_addr][31:16])/4+1;
-
-/*				//------------distination addr-------------------
-				dist_addr_check;
-				//------------source addr ------------------------
-				source_addr_check;
-				//-------------length check-----------------------
-				length_check;
-				//-------------payload colletion-----------------
-				payload_check;
-				//------------crc collect----------------
-				crc_collect;*/
-					$display($time,"----bit32_flag = %0d---",bit32_flag);
-					$display($time,"----bd_done = %0d---",bd_done);
-
+				//$display($time,"----bit32_flag = %0d---",bit32_flag);
+				//$display($time,"----bd_done = %0d---",bd_done);
+				//$display($time,"----FRAME = %p  size=%0d ",frame_byte_queue,frame_byte_queue.size);
 
 				//----------------receive total frame length------------------------
-				if(bit32_flag==bd_done/* && h_eth_config_class.RXD[rx_bd_addr][15]*/) begin
-
-				//------------distination addr-------------------
-				dist_addr_check;
-				//------------source addr ------------------------
-				source_addr_check;
-				//-------------length check-----------------------
-				length_check;
-				//-------------payload colletion-----------------
-				payload_check;
-				//------------crc collect----------------
-				crc_collect;
-
-//$display($time," ********************** %p ",byte_payload_storing_que_out_mon);
-
+				if(bit32_flag==bd_done) begin
+					//------------distination addr-------------------
+					dist_addr_check;
+					//------------source addr ------------------------
+					source_addr_check;
+					//-------------length check-----------------------
+					length_check;
+					//-------------payload colletion-----------------
+					payload_check;
+					//------------crc collect----------------
+					crc_collect;
+					//-------------------- calling write method -------
 					h_mem_output_monitor_port.write(byte_payload_storing_que_out_mon);
+
+					dummy_crc();
+				
 					event_out_mon.trigger();//----- event trigger for scoreboard comparision after 1 bd ---
 
-
-$display($time," &&&&&&&&&&&&&&&&&&&&&& under trigger &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& size  %0d ---- flag  %b \n\n\n\n\n",byte_payload_storing_que_out_mon.size,h_eth_config_class.delete_flag);
-
-
-
-					//----------------------send crc based on frame length only--------------------------
-					for(int i=0;i<((18+h_eth_config_class.RXD[rx_bd_addr][31:16])*2);i++)
-						nibble_crc[i] = nibble_crc_temp[i];
-						
+					//----------------------send crc based on frame length only--------------------------					
+					
 					crc_check;					
 					//$display($time,"----rx_bd_addr = %0d---",h_eth_config_class.RXD[rx_bd_addr][31:16]);
 					//$display($time,"----bit32_flag = %0d---",bit32_flag);
@@ -201,23 +179,32 @@ $display($time," &&&&&&&&&&&&&&&&&&&&&& under trigger &&&&&&&&&&&&&&&&&&&&&&&&&&
 
 					//------------------increment bd after every receive----------------------
 					bd_count++;
-					//$display($time,"---bd_number={%0d}----payload-----= %p --size-----bd_count------ ",bd_count,byte_payload_storing_que_out_mon,byte_payload_storing_que_out_mon.size);
+				//	$display($time,"---bd_number={%0d}----payload-----= %p --size-----bd_count------ ",bd_count,byte_payload_storing_que_out_mon,byte_payload_storing_que_out_mon.size);
 					//------increment the next bd_addr after respective frame --------------------------
 					rx_bd_addr+=8; 
 					//---------------deleting  and payload queue frame queue afeter payload trasmitting----------------
 					frame_byte_queue.delete();
-					nibble_crc_temp.delete();
 					nibble_crc.delete();
-					flag=0;
-					if(h_eth_config_class.delete_flag) byte_payload_storing_que_out_mon.delete();
+					nibble_crc_temp.delete();
+				/*	if(h_eth_config_class.delete_flag) */byte_payload_storing_que_out_mon.delete();
+					
+					//$display($time,"^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^%p^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",byte_payload_storing_que_out_mon);
 					//--------------initlize flag after frame trasmitting ----------------------
 					bit32_flag = 0;
 					bd_done = 0;
+					flag = 0;// flag remains zero after bd_receive
 				end
 			end
 		end	
 
 	endtask
+
+	task dummy_crc;
+		for(int i=0;i<((18+temp_length)*2);i++) begin
+			nibble_crc[i] = nibble_crc_temp[i];
+		end
+	endtask
+
 
 	//----------------here distination addr of the rx is source addr of the tx ----------------
 	//-----------------then here campare source addr resister from config class to received distination addr from dut------------------
@@ -276,10 +263,11 @@ $display($time," &&&&&&&&&&&&&&&&&&&&&& under trigger &&&&&&&&&&&&&&&&&&&&&&&&&&
 	//------------------------task for payload store into queue--------------------
 	task payload_check;
 		//---------------payload has store from 14 to length of respestive rx_bd index in the frame---------------
+
 		if(frame_byte_queue.size>=(14+h_eth_config_class.RXD[rx_bd_addr][31:16])) begin
-		//	$display($time,"h_eth_config_class.RXD[rx_bd_addr]=%0d",h_eth_config_class.RXD[rx_bd_addr][31:16]);
+			//$display($time,"h_eth_config_class.RXD[rx_bd_addr]=%0d",h_eth_config_class.RXD[rx_bd_addr][31:16]);
 			//-----------------loop itrate from length time of respetive bd-------------------
-			for(int i=14;i<h_eth_config_class.RXD[rx_bd_addr][31:16]+14;i++) begin
+			for(int i=14;i<temp_length+14;i++) begin
 				byte_payload_storing_que_out_mon[i-14] = frame_byte_queue[i];
 			end
 		end
@@ -354,14 +342,15 @@ $display($time," &&&&&&&&&&&&&&&&&&&&&& under trigger &&&&&&&&&&&&&&&&&&&&&&&&&&
 			end
 		
 		calculated_magic_number = crc_variable;
+		$display($time,"----------------------calculated_magic_number=%0h---------------------",calculated_magic_number);
 		if(32'hc704dd7b==calculated_magic_number) begin
 
-			`uvm_info("*******MAGIC CRC MATCH********" , $sformatf("========MAGIC CRC PASS======") , UVM_LOW);
+			`uvm_info("*******MAGIC CRC MATCH********" , $sformatf("========MAGIC CRC PASS=======") , UVM_LOW);
 	
 		end
 
 		else begin
-			`uvm_info("*******MAGIC CRC MISMATCH********" , $sformatf("========MAGIC CRC FAIL=====") , UVM_LOW);
+			`uvm_info("*******MAGIC CRC MISMATCH********" , $sformatf("========MAGIC CRC FAIL=======") , UVM_LOW);
 		end
 
 		
